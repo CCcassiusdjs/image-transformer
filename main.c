@@ -21,6 +21,12 @@
 #define BUTTON_WIDTH 200
 #define BUTTON_HEIGHT 40
 #define BUTTON_MARGIN 10
+const char* g_szClassName = "ImageProcessingWindow";
+const char* g_welcomeClassName = "WelcomeWindow";
+HINSTANCE g_hInstance;
+HWND g_mainWindow;
+void ShowMainWindow();
+void ShowWelcomeWindow();
 
 // Define maximum dimensions for the comparison window
 #define MAX_WINDOW_WIDTH 1200
@@ -47,6 +53,7 @@ void generate_aged_image(Pixel **image, int width, int height);
 void process_image(HWND hwnd, int operation);
 void apply_all_transformations(HWND hwnd);
 void show_comparison_window(Pixel **original, Pixel **modified, int width, int height);
+
 
 // Global variables
 char file_name[MAX_PATH];
@@ -125,10 +132,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                          startX, startY, BUTTON_WIDTH, BUTTON_HEIGHT, hwnd, (HMENU) 6, GetModuleHandle(NULL), NULL);
 
             startY += BUTTON_HEIGHT + BUTTON_MARGIN;
-            CreateWindow("BUTTON", "Apply All", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                         startX, startY, BUTTON_WIDTH, BUTTON_HEIGHT, hwnd, (HMENU) 7, GetModuleHandle(NULL), NULL);
-
-            startY += BUTTON_HEIGHT + BUTTON_MARGIN;
             CreateWindow("BUTTON", "Exit", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
                          startX, startY, BUTTON_WIDTH, BUTTON_HEIGHT, hwnd, (HMENU) 8, GetModuleHandle(NULL), NULL);
 
@@ -180,16 +183,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     }
                     break;
 
-                case 7: // Apply all transformations
-                    if (image) {
-                        apply_all_transformations(hwnd);
-                        show_comparison_window(original_image, image, width, height);
-                    } else {
-                        MessageBox(hwnd, "No image loaded. Please load an image first.", "Error", MB_OK | MB_ICONERROR);
-                    }
-                    break;
-
-                case 8: // Exit
+                case 7: // Exit
                     PostQuitMessage(0);
                     break;
 
@@ -252,17 +246,6 @@ void process_image(HWND hwnd, int operation) {
         default:
             break;
     }
-}
-
-// Function to apply all transformations to the image
-void apply_all_transformations(HWND hwnd) {
-    process_image(hwnd, 2); // Grayscale
-    process_image(hwnd, 3); // Negative
-    process_image(hwnd, 4); // X-ray
-    process_image(hwnd, 5); // Rotate
-    process_image(hwnd, 6); // Aged Effect
-
-    MessageBox(hwnd, "All transformations applied successfully.", "Success", MB_OK | MB_ICONINFORMATION);
 }
 
 // Function to create a directory if it does not exist
@@ -429,28 +412,34 @@ void save_image(const char *file_name, Pixel **image, int width, int height) {
 }
 
 // Function to convert the image to grayscale
+ // Function to convert the image to grayscale
 void convert_to_grayscale(Pixel **image, int width, int height) {
     printf("Converting image to grayscale...\n");
 
+    // Apply parallel processing for the grayscale transformation
     #pragma omp parallel for collapse(2)
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
+            // Calculate the grayscale value using the weighted sum method
             unsigned char gray = (unsigned char)(image[i][j].r * GRAYSCALE_RED_WEIGHT +
                                                 image[i][j].g * GRAYSCALE_GREEN_WEIGHT +
                                                 image[i][j].b * GRAYSCALE_BLUE_WEIGHT);
+            // Set each color channel to the grayscale value
             image[i][j].r = image[i][j].g = image[i][j].b = gray;
         }
     }
     printf("Grayscale conversion completed.\n");
 }
 
-// Function to generate a negative image
+// Function to generate a negative of the image
 void generate_negative_image(Pixel **image, int width, int height) {
     printf("Generating negative image...\n");
 
+    // Use parallel processing to invert each pixel's color channels
     #pragma omp parallel for collapse(2)
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
+            // Invert each color channel to achieve the negative effect
             image[i][j].r = MAX_COLOR_VALUE - image[i][j].r;
             image[i][j].g = MAX_COLOR_VALUE - image[i][j].g;
             image[i][j].b = MAX_COLOR_VALUE - image[i][j].b;
@@ -459,17 +448,24 @@ void generate_negative_image(Pixel **image, int width, int height) {
     printf("Negative image generated successfully.\n");
 }
 
-// Function to generate an X-ray effect image
+// Function to generate an X-ray effect on the image
 void generate_xray_image(Pixel **image, int width, int height) {
     printf("Generating X-ray image...\n");
 
+    // Start by converting the image to grayscale for the X-ray effect
     convert_to_grayscale(image, width, height);
     float factor = 1.5;
 
+    // Apply parallel processing to enhance the grayscale image
     #pragma omp parallel for collapse(2)
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
-            unsigned char gray = (unsigned char)pow(image[i][j].r, factor);
+            // Ensure grayscale value is non-zero to avoid potential math errors
+            unsigned char gray = image[i][j].r;
+            if (gray > 0) {
+                gray = (unsigned char)pow(gray, factor);
+            }
+            // Clamp the value to the maximum color limit if it exceeds it
             image[i][j].r = image[i][j].g = image[i][j].b = (gray > MAX_COLOR_VALUE) ? MAX_COLOR_VALUE : gray;
         }
     }
@@ -480,38 +476,48 @@ void generate_xray_image(Pixel **image, int width, int height) {
 Pixel **rotate_image(Pixel **image, int width, int height) {
     printf("Rotating the image by 90 degrees...\n");
 
-    Pixel **rotated_image = allocate_image(width, height);
+    // Allocate memory for the rotated image with swapped dimensions
+    Pixel **rotated_image = allocate_image(height, width); // Swap width and height for 90-degree rotation
     if (!rotated_image) {
-        return NULL;
+        return NULL; // Return NULL if memory allocation fails
     }
 
+    // Rotate the image by copying pixels to new positions
     #pragma omp parallel for collapse(2)
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
+            // Rotate each pixel by 90 degrees counterclockwise
             rotated_image[j][height - i - 1] = image[i][j];
         }
     }
 
     printf("Rotation completed.\n");
+
+    // Free original image memory if it won't be reused
+    free_image(image);
     return rotated_image;
 }
 
-// Function to generate an aged effect image
+// Function to generate an aged effect on the image
 void generate_aged_image(Pixel **image, int width, int height) {
     printf("Generating aged image...\n");
-    float factor = 0.1;
+    float factor = 0.1; // Factor to adjust intensities for aging effect
 
+    // Apply parallel processing to adjust each pixel for aging effect
     #pragma omp parallel for collapse(2)
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
+            // Calculate new intensities with weighted adjustments to mimic aging
             float red_intensity = image[i][j].r * (1 + factor * (MAX_COLOR_VALUE - image[i][j].r) / (float)MAX_COLOR_VALUE);
             float green_intensity = image[i][j].g * (1 + factor * (MAX_COLOR_VALUE - image[i][j].g) / (float)MAX_COLOR_VALUE);
             float blue_intensity = image[i][j].b * (1 - factor * image[i][j].b / (float)MAX_COLOR_VALUE);
 
+            // Further refine intensities to add an aged look
             red_intensity += 10 * (1 - image[i][j].r / (float)MAX_COLOR_VALUE);
             green_intensity += 10 * (1 - image[i][j].g / (float)MAX_COLOR_VALUE);
             blue_intensity -= 10 * (image[i][j].b / (float)MAX_COLOR_VALUE);
 
+            // Clamp intensities to the allowed color range and set new values
             image[i][j].r = (unsigned char)fmin(fmax(red_intensity, 0), MAX_COLOR_VALUE);
             image[i][j].g = (unsigned char)fmin(fmax(green_intensity, 0), MAX_COLOR_VALUE);
             image[i][j].b = (unsigned char)fmin(fmax(blue_intensity, 0), MAX_COLOR_VALUE);
@@ -520,6 +526,7 @@ void generate_aged_image(Pixel **image, int width, int height) {
 
     printf("Aged image generated successfully.\n");
 }
+
 
 // Function to display a window comparing the original and modified images
 void show_comparison_window(Pixel **original, Pixel **modified, int width, int height) {
