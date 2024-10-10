@@ -452,21 +452,24 @@ void generate_negative_image(Pixel **image, int width, int height) {
 void generate_xray_image(Pixel **image, int width, int height) {
     printf("Generating X-ray image...\n");
 
-    // Start by converting the image to grayscale for the X-ray effect
+    // Convert to grayscale
     convert_to_grayscale(image, width, height);
     float factor = 1.5;
 
-    // Apply parallel processing to enhance the grayscale image
-    #pragma omp parallel for collapse(2)
+    // Apply transformation with inversion and enhanced contrast
+#pragma omp parallel for collapse(2)
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
-            // Ensure grayscale value is non-zero to avoid potential math errors
-            unsigned char gray = image[i][j].r;
-            if (gray > 0) {
-                gray = (unsigned char)pow(gray, factor);
-            }
-            // Clamp the value to the maximum color limit if it exceeds it
-            image[i][j].r = image[i][j].g = image[i][j].b = (gray > MAX_COLOR_VALUE) ? MAX_COLOR_VALUE : gray;
+            unsigned char gray = image[i][j].r;  // Grayscale value (already converted)
+
+            // Enhance contrast using a power transformation
+            float enhanced_gray = pow(gray / (float)MAX_COLOR_VALUE, factor) * MAX_COLOR_VALUE;
+
+            // Optionally invert the image to simulate X-ray appearance
+            unsigned char xray_intensity = MAX_COLOR_VALUE - (unsigned char)fmin(fmax(enhanced_gray, 0), MAX_COLOR_VALUE);
+
+            // Set each color channel to the calculated X-ray intensity
+            image[i][j].r = image[i][j].g = image[i][j].b = xray_intensity;
         }
     }
     printf("X-ray image generated successfully.\n");
